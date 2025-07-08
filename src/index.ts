@@ -1,66 +1,96 @@
-import { DurableObject } from "cloudflare:workers";
+import { routeAgentRequest, Schedule } from 'agents';
+import { AIChatAgent } from 'agents/ai-chat-agent';
+import { unstable_getSchedulePrompt } from 'agents/schedule';
+import { createDataStreamResponse, generateId, streamText, StreamTextOnFinishCallback, ToolSet } from 'ai';
+import { processToolCalls } from './utils';
+import { executions, tools } from './tools';
+import { openai } from '@ai-sdk/openai';
 
-/**
- * Welcome to Cloudflare Workers! This is your first Durable Objects application.
- *
- * - Run `npm run dev` in your terminal to start a development server
- * - Open a browser tab at http://localhost:8787/ to see your Durable Object in action
- * - Run `npm run deploy` to publish your application
- *
- * Bind resources to your worker in `wrangler.jsonc`. After adding bindings, a type definition for the
- * `Env` object can be regenerated with `npm run cf-typegen`.
- *
- * Learn more at https://developers.cloudflare.com/durable-objects
- */
+const model = openai('gpt-4-turbo');
 
-/** A Durable Object's behavior is defined in an exported Javascript class */
-export class MyDurableObject extends DurableObject<Env> {
+export class Chat extends AIChatAgent<Env> {
 	/**
-	 * The constructor is invoked once upon creation of the Durable Object, i.e. the first call to
-	 * 	`DurableObjectStub::get` for a given identifier (no-op constructors can be omitted)
-	 *
-	 * @param ctx - The interface for interacting with Durable Object state
-	 * @param env - The interface to reference bindings declared in wrangler.jsonc
+	 * Handles incoming chat messages and manages the response stream
+	 * @param onFinish - Callback function executed when streaming completes
 	 */
-	constructor(ctx: DurableObjectState, env: Env) {
-		super(ctx, env);
+
+	async onChatMessage(onFinish: StreamTextOnFinishCallback<ToolSet>, _options?: { abortSignal?: AbortSignal }) {
+		// const mcpConnection = await this.mcp.connect(
+		//   "https://path-to-mcp-server/sse"
+		// );
+
+		// Collect all tools, including MCP tools
+		const allTools = {
+			...tools,
+			...this.mcp.unstable_getAITools(),
+		};
+
+		console.log({ allTools });
+
+		// Create a streaming response that handles both text and tool outputs
+		const dataStreamResponse = createDataStreamResponse({
+			execute: async (dataStream) => {
+				// Process any pending tool calls from previous messages
+				// This handles human-in-the-loop confirmations for tools
+				const processedMessages = await processToolCalls({
+					messages: this.messages,
+					dataStream,
+					tools: allTools,
+					executions,
+				});
+
+				// Stream the AI response using GPT-4
+				const result = streamText({
+					model,
+					system: `You are a helpful assistant that can do various tasks... 
+
+${unstable_getSchedulePrompt({ date: new Date() })}
+
+If the user asks to schedule a task, use the schedule tool to schedule the task
+`,
+					messages: processedMessages,
+					tools: allTools,
+					onFinish: async (args) => {
+						onFinish(args as Parameters<StreamTextOnFinishCallback<ToolSet>>[0]);
+						// await this.mcp.closeConnection(mcpConnection.id);
+					},
+					onError: (error) => {
+						console.error('Error while streaming:', error);
+					},
+					maxSteps: 10,
+				});
+
+				// Merge the AI response stream with tool execution outputs
+				result.mergeIntoDataStream(dataStream);
+			},
+		});
+
+		return dataStreamResponse;
 	}
 
-	/**
-	 * The Durable Object exposes an RPC method sayHello which will be invoked when when a Durable
-	 *  Object instance receives a request from a Worker via the same method invocation on the stub
-	 *
-	 * @param name - The name provided to a Durable Object instance from a Worker
-	 * @returns The greeting to be sent back to the Worker
-	 */
-	async sayHello(name: string): Promise<string> {
-		return `Hello, ${name}!`;
+	async executeTask(description: string, _task: Schedule<string>) {
+		await this.saveMessages([
+			...this.messages,
+			{
+				id: generateId(),
+				role: 'user',
+				content: `Running scheduled task: ${description}`,
+				createdAt: new Date(),
+			},
+		]);
 	}
 }
 
 export default {
-	/**
-	 * This is the standard fetch handler for a Cloudflare Worker
-	 *
-	 * @param request - The request submitted to the Worker from the client
-	 * @param env - The interface to reference bindings declared in wrangler.jsonc
-	 * @param ctx - The execution context of the Worker
-	 * @returns The response to be sent back to the client
-	 */
-	async fetch(request, env, ctx): Promise<Response> {
-		// Create a `DurableObjectId` for an instance of the `MyDurableObject`
-		// class named "foo". Requests from all Workers to the instance named
-		// "foo" will go to a single globally unique Durable Object instance.
-		const id: DurableObjectId = env.MY_DURABLE_OBJECT.idFromName("foo");
-
-		// Create a stub to open a communication channel with the Durable
-		// Object instance.
-		const stub = env.MY_DURABLE_OBJECT.get(id);
-
-		// Call the `sayHello()` RPC method on the stub to invoke the method on
-		// the remote Durable Object instance
-		const greeting = await stub.sayHello("world");
-
-		return new Response(greeting);
+	async fetch(request, env, _ctx): Promise<Response> {
+		return (
+			(await routeAgentRequest(request, env, {
+				cors: {
+					'Access-Control-Allow-Origin': 'http://localhost:5173',
+					'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+					'Access-Control-Allow-Headers': 'Content-Type',
+				},
+			})) || new Response('Not found', { status: 404 })
+		);
 	},
 } satisfies ExportedHandler<Env>;
