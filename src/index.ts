@@ -25,6 +25,7 @@ export class Chat extends AIChatAgent<Env> {
         description: 'Get the metadata for every lesson',
         parameters: z.object({}),
         execute: async () => {
+          console.log('Fetching lesson metadata from KV store');
           const lessons = await lessonKv.list({ prefix: 'lesson:' });
 
           console.log({ lessons });
