@@ -65,6 +65,7 @@ export class Chat extends AIChatAgent<Env> {
   }
 
   async onChatMessage(onFinish: StreamTextOnFinishCallback<ToolSet>, _options?: { abortSignal?: AbortSignal }) {
+    console.log('onChatMessage called with messages:', this.messages);
     // Collect all tools, including MCP tools
     const allTools = {
       ...this.tools,
@@ -135,19 +136,14 @@ export default {
 
     console.log('Request received:', request);
 
-    try {
-      const result = await routeAgentRequest(request, env, {
+    return (
+      (await routeAgentRequest(request, env, {
         cors: {
           'Access-Control-Allow-Origin': origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0],
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type',
         },
-      });
-
-      return result ? result : new Response('Not found', { status: 404 });
-    } catch (error) {
-      console.error('Error processing request:', error);
-      return new Response('Internal Server Error', { status: 500 });
-    }
+      })) || new Response('Not found', { status: 404 })
+    );
   },
 } satisfies ExportedHandler<Env>;
