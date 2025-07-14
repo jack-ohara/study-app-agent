@@ -65,7 +65,7 @@ export class Chat extends AIChatAgent<Env> {
   }
 
   async onChatMessage(onFinish: StreamTextOnFinishCallback<ToolSet>, _options?: { abortSignal?: AbortSignal }) {
-    console.log('onChatMessage called with messages:', this.messages);
+    console.log('onChatMessage called with messages:', this.messages[this.messages.length - 1]);
     // Collect all tools, including MCP tools
     const allTools = {
       ...this.tools,
@@ -75,6 +75,7 @@ export class Chat extends AIChatAgent<Env> {
     // Create a streaming response that handles both text and tool outputs
     const dataStreamResponse = createDataStreamResponse({
       execute: async (dataStream) => {
+        console.log('Executing onChatMessage with messages');
         // Process any pending tool calls from previous messages
         // This handles human-in-the-loop confirmations for tools
         const processedMessages = await processToolCalls({
@@ -83,6 +84,8 @@ export class Chat extends AIChatAgent<Env> {
           tools: allTools,
           executions: {},
         });
+
+        console.log('processed tool calls. Calling LLM...');
 
         // Stream the AI response using GPT-4
         const result = streamText({
@@ -99,6 +102,7 @@ export class Chat extends AIChatAgent<Env> {
           messages: processedMessages,
           tools: allTools,
           onFinish: async (args) => {
+            console.log('AI response finished:', args);
             onFinish(args as Parameters<StreamTextOnFinishCallback<ToolSet>>[0]);
             // await this.mcp.closeConnection(mcpConnection.id);
           },
