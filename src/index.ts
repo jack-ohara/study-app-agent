@@ -5,7 +5,7 @@ import { processToolCalls } from './utils';
 import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
 
-const model = openai('gpt-4.1');
+const model = openai('o4-mini');
 
 const storedLessonSchema = z.object({
   date: z.string().describe('The date of the lesson'),
