@@ -135,14 +135,19 @@ export default {
 
     console.log('Request received:', request);
 
-    return (
-      (await routeAgentRequest(request, env, {
+    try {
+      const result = await routeAgentRequest(request, env, {
         cors: {
           'Access-Control-Allow-Origin': origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0],
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type',
         },
-      })) || new Response('Not found', { status: 404 })
-    );
+      });
+
+      return result ? result : new Response('Not found', { status: 404 });
+    } catch (error) {
+      console.error('Error processing request:', error);
+      return new Response('Internal Server Error', { status: 500 });
+    }
   },
 } satisfies ExportedHandler<Env>;
