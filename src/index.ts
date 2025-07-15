@@ -110,7 +110,7 @@ export class Chat extends AIChatAgent<Env> {
           onError: (error) => {
             console.error('Error while streaming:', error);
           },
-          maxSteps: 10,
+          maxSteps: Infinity,
         });
 
         // Merge the AI response stream with tool execution outputs
